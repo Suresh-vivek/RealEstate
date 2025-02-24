@@ -4,7 +4,8 @@ Welcome to the project! This structure is based on the Flask framework and uses 
 
 ## Directory Structure:
 
-### `app/` 
+### `app/`
+
 This is the main application directory containing all the core files for our Flask application.
 
 - `__init__.py`: Initializes the Flask app using the Flask factory pattern. This allows for creating multiple instances of the app if needed, e.g., for testing.
@@ -12,9 +13,11 @@ This is the main application directory containing all the core files for our Fla
 - `config.py`: Contains configurations/settings for the Flask application. All environment-specific variables and secrets are typically loaded and accessed here.
 
 - `decorators/`: Contains Python decorators that can be used across the application.
+
   - `security.py`: Houses security-related decorators, for example, to check the validity of incoming requests.
 
 - `utils/`: Utility functions and helpers to aid different functionalities in the application.
+
   - `whatsapp_utils.py`: Contains utility functions specifically for handling WhatsApp related operations.
 
 - `views.py`: Represents the main blueprint of the app where the endpoints are defined. In Flask, a blueprint is a way to organize related views and operations. Think of it as a mini-application within the main application with its routes and errors.
@@ -40,5 +43,6 @@ This is the main application directory containing all the core files for our Fla
 If you're new to Flask or working on larger Flask projects, understanding this structure can give a solid foundation to build upon and maintain scalable Flask applications.
 
 ## Running the App
+
 When you want to run the app, just execute the run.py script. It will create the app instance and run the Flask development server.
 Lastly, it's good to note that when you deploy the app to a production environment, you might not use run.py directly (especially if you use something like Gunicorn or uWSGI). Instead, you'd just need the application instance, which is created using create_app(). The details of this vary depending on your deployment strategy, but it's a point to keep in mind.

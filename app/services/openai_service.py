@@ -1,97 +1,116 @@
 from openai import OpenAI
 import shelve
-from dotenv import load_dotenv
 import os
 import time
+from dotenv import load_dotenv, set_key
 import logging
 
+# Load environment variables
 load_dotenv()
+
+# Load API key
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_ASSISTANT_ID = os.getenv("OPENAI_ASSISTANT_ID")
 client = OpenAI(api_key=OPENAI_API_KEY)
 
+# Get script's base directory
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-def upload_file(path):
-    # Upload a file with an "assistants" purpose
-    file = client.files.create(
-        file=open("../../data/airbnb-faq.pdf", "rb"), purpose="assistants"
-    )
+# Resolve absolute path for the CSV file
+FILE_PATH = os.path.join(BASE_DIR, "../../data/data.csv")
 
+def upload_file(file_path):
+    """Uploads a file and returns the file ID."""
+    try:
+        with open(file_path, "rb") as file:
+            uploaded_file = client.files.create(file=file, purpose="assistants")  # ✅ Use "assistants" as purpose
+        return uploaded_file.id
+    except FileNotFoundError:
+        logging.error(f"File not found: {file_path}")
+        return None
+    except Exception as e:
+        logging.error(f"File upload failed: {e}")
+        return None
 
-def create_assistant(file):
-    """
-    You currently cannot set the temperature for Assistant via the API.
-    """
-    assistant = client.beta.assistants.create(
-        name="WhatsApp AirBnb Assistant",
-        instructions="You're a helpful WhatsApp assistant that can assist guests that are staying in our Paris AirBnb. Use your knowledge base to best respond to customer queries. If you don't know the answer, say simply that you cannot help with question and advice to contact the host directly. Be friendly and funny.",
-        tools=[{"type": "retrieval"}],
-        model="gpt-4-1106-preview",
-        file_ids=[file.id],
-    )
-    return assistant
+def create_assistant(file_id):
+    """Creates an assistant with file search enabled and attaches the file."""
+    try:
+        assistant = client.beta.assistants.create(
+            name="WhatsApp Real Estate Assistant",
+            instructions="You are a smart real estate chatbot that helps users find the best properties...",
+            tools=[{"type": "file_search"}],  # ✅ Enable file search
+            model="gpt-4o-mini",
+            file_ids=[file_id] if file_id else []  # Attach file at the assistant level
+        )
+        return assistant.id
+    except Exception as e:
+        logging.error(f"Assistant creation failed: {e}")
+        return None
 
+# Initialize assistant
+assistant_id = os.getenv("ASSISTANT_ID")
+file_id = upload_file(FILE_PATH)
 
-# Use context manager to ensure the shelf file is closed properly
+if not assistant_id and file_id:
+    assistant_id = create_assistant(file_id)
+    if assistant_id:
+        set_key(".env", "ASSISTANT_ID", assistant_id)
+
 def check_if_thread_exists(wa_id):
-    with shelve.open("threads_db") as threads_shelf:
-        return threads_shelf.get(wa_id, None)
-
+    """Checks if a thread exists for a given WhatsApp ID."""
+    with shelve.open("threads_db") as db:
+        return db.get(wa_id, None)
 
 def store_thread(wa_id, thread_id):
-    with shelve.open("threads_db", writeback=True) as threads_shelf:
-        threads_shelf[wa_id] = thread_id
+    """Stores a thread ID for a given WhatsApp ID."""
+    with shelve.open("threads_db", writeback=True) as db:
+        db[wa_id] = thread_id
 
+def run_assistant(thread_id, assistant_id):
+    """Runs the assistant and returns the generated response."""
+    try:
+        run = client.beta.threads.runs.create(
+            thread_id=thread_id,
+            assistant_id=assistant_id,
+        )
 
-def run_assistant(thread, name):
-    # Retrieve the Assistant
-    assistant = client.beta.assistants.retrieve(OPENAI_ASSISTANT_ID)
+        while run.status not in ["completed", "failed"]:
+            time.sleep(0.5)
+            run = client.beta.threads.runs.retrieve(thread_id=thread_id, run_id=run.id)
 
-    # Run the assistant
-    run = client.beta.threads.runs.create(
-        thread_id=thread.id,
-        assistant_id=assistant.id,
-        # instructions=f"You are having a conversation with {name}",
-    )
+        if run.status == "failed":
+            return "Sorry, the assistant run failed."
 
-    # Wait for completion
-    # https://platform.openai.com/docs/assistants/how-it-works/runs-and-run-steps#:~:text=under%20failed_at.-,Polling%20for%20updates,-In%20order%20to
-    while run.status != "completed":
-        # Be nice to the API
-        time.sleep(0.5)
-        run = client.beta.threads.runs.retrieve(thread_id=thread.id, run_id=run.id)
+        messages = client.beta.threads.messages.list(thread_id=thread_id)
+        return messages.data[0].content[0].text.value
+    except Exception as e:
+        logging.error(f"Error running assistant: {e}")
+        return "Sorry, I encountered an error."
 
-    # Retrieve the Messages
-    messages = client.beta.threads.messages.list(thread_id=thread.id)
-    new_message = messages.data[0].content[0].text.value
-    logging.info(f"Generated message: {new_message}")
-    return new_message
+def generate_response(message_body, wa_id, name, assistant_id):
+    """Generates a response using the assistant and maintains threads."""
+    try:
+        thread_id = check_if_thread_exists(wa_id)
 
+        if thread_id is None:
+            thread = client.beta.threads.create()
+            store_thread(wa_id, thread.id)
+            thread_id = thread.id
+        else:
+            thread = client.beta.threads.retrieve(thread_id)
 
-def generate_response(message_body, wa_id, name):
-    # Check if there is already a thread_id for the wa_id
-    thread_id = check_if_thread_exists(wa_id)
+        # ✅ Send message without file_ids
+        client.beta.threads.messages.create(
+            thread_id=thread_id,
+            role="user",
+            content=message_body
+        )
+        
+        return run_assistant(thread_id, assistant_id)
+    except Exception as e:
+        logging.error(f"Error generating response: {e}")
+        return "Sorry, something went wrong."
 
-    # If a thread doesn't exist, create one and store it
-    if thread_id is None:
-        logging.info(f"Creating new thread for {name} with wa_id {wa_id}")
-        thread = client.beta.threads.create()
-        store_thread(wa_id, thread.id)
-        thread_id = thread.id
-
-    # Otherwise, retrieve the existing thread
-    else:
-        logging.info(f"Retrieving existing thread for {name} with wa_id {wa_id}")
-        thread = client.beta.threads.retrieve(thread_id)
-
-    # Add message to thread
-    message = client.beta.threads.messages.create(
-        thread_id=thread_id,
-        role="user",
-        content=message_body,
-    )
-
-    # Run the assistant and get the new message
-    new_message = run_assistant(thread, name)
-
-    return new_message
+if __name__ == "__main__":
+    # Example usage
+    response = generate_response("What are the check-in timings?", "wa_12345", "John", assistant_id)
+    print("Assistant Response:", response)
