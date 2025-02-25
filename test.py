@@ -12,7 +12,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 OPENAI_API_KEY =""
 FACEBOOK_ACCESS_TOKEN = ""
-FACEBOOK_PHONE_NUMBER_ID = "539867362551821"
+FACEBOOK_PHONE_NUMBER_ID = ""
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 app = Flask(__name__)
